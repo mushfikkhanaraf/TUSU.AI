@@ -1,0 +1,559 @@
+name: Auto Build TUSU AI APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Official Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: "8.5"
+
+    - name: Generate Complete TUSU AI Android Project
+      run: |
+        mkdir -p app/src/main/java/com/akthecoder/tusuai/view
+        mkdir -p app/src/main/res/layout
+        mkdir -p app/src/main/res/values
+
+        echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+        # 1. Root build.gradle
+        cat << 'EOF' > build.gradle
+        buildscript {
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.2.2'
+            }
+        }
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        EOF
+
+        # 2. settings.gradle
+        cat << 'EOF' > settings.gradle
+        include ':app'
+        rootProject.name = "TUSU-AI"
+        EOF
+
+        # 3. app/build.gradle
+        cat << 'EOF' > app/build.gradle
+        plugins {
+            id 'com.android.application'
+        }
+        android {
+            namespace 'com.akthecoder.tusuai'
+            compileSdk 34
+            defaultConfig {
+                applicationId "com.akthecoder.tusuai"
+                minSdk 24
+                targetSdk 34
+                versionCode 2
+                versionName "1.0.1"
+            }
+            buildTypes {
+                debug {
+                    debuggable true
+                }
+            }
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_1_8
+                targetCompatibility JavaVersion.VERSION_1_8
+            }
+        }
+        dependencies {
+            implementation 'androidx.appcompat:appcompat:1.6.1'
+            implementation 'com.google.android.material:material:1.11.0'
+            implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+            implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+        }
+        EOF
+
+        # 4. AndroidManifest.xml
+        cat << 'EOF' > app/src/main/AndroidManifest.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.RECORD_AUDIO" />
+            <uses-permission android:name="android.permission.CAMERA" />
+            <uses-feature android:name="android.hardware.camera" android:required="false" />
+            <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+            <application
+                android:allowBackup="true"
+                android:label="TUSU AI"
+                android:supportsRtl="true"
+                android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
+                <activity
+                    android:name=".MainActivity"
+                    android:exported="true"
+                    android:screenOrientation="portrait"
+                    android:windowSoftInputMode="adjustResize">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+                <activity android:name=".SettingsActivity" android:exported="false" />
+            </application>
+        </manifest>
+        EOF
+
+        # 5. Colors
+        cat << 'EOF' > app/src/main/res/values/colors.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <color name="bg_dark">#080B10</color>
+            <color name="cyan_core">#00F0FF</color>
+            <color name="blue_electric">#0072FF</color>
+            <color name="status_online">#00E676</color>
+            <color name="status_listening">#00F0FF</color>
+            <color name="status_thinking">#FFD600</color>
+            <color name="status_speaking">#E040FB</color>
+            <color name="status_error">#FF1744</color>
+        </resources>
+        EOF
+
+        # 6. JarvisCoreView.java
+        cat << 'EOF' > app/src/main/java/com/akthecoder/tusuai/view/JarvisCoreView.java
+        package com.akthecoder.tusuai.view;
+        import android.animation.ValueAnimator;
+        import android.content.Context;
+        import android.graphics.*;
+        import android.util.AttributeSet;
+        import android.view.View;
+        import android.view.animation.LinearInterpolator;
+
+        public class JarvisCoreView extends View {
+            public enum State { ONLINE, LISTENING, THINKING, SPEAKING, ERROR }
+            private Paint ringPaint, arcPaint, dashedPaint;
+            private float rotationAngle = 0f;
+            private float pulse = 1f;
+            private RectF arcBounds = new RectF();
+
+            public JarvisCoreView(Context c, AttributeSet a) {
+                super(c, a);
+                ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                ringPaint.setStyle(Paint.Style.STROKE);
+                ringPaint.setStrokeWidth(4f);
+                ringPaint.setColor(Color.parseColor("#00F0FF"));
+
+                arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                arcPaint.setStyle(Paint.Style.STROKE);
+                arcPaint.setStrokeWidth(7f);
+                arcPaint.setColor(Color.parseColor("#0072FF"));
+
+                dashedPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                dashedPaint.setStyle(Paint.Style.STROKE);
+                dashedPaint.setStrokeWidth(3f);
+                dashedPaint.setColor(Color.parseColor("#00F0FF"));
+                dashedPaint.setPathEffect(new DashPathEffect(new float[]{12, 16}, 0));
+
+                ValueAnimator r = ValueAnimator.ofFloat(0f, 360f);
+                r.setDuration(6000);
+                r.setRepeatCount(ValueAnimator.INFINITE);
+                r.setInterpolator(new LinearInterpolator());
+                r.addUpdateListener(an -> { rotationAngle = (float) an.getAnimatedValue(); invalidate(); });
+                r.start();
+
+                ValueAnimator p = ValueAnimator.ofFloat(0.85f, 1.15f);
+                p.setDuration(1400);
+                p.setRepeatCount(ValueAnimator.INFINITE);
+                p.setRepeatMode(ValueAnimator.REVERSE);
+                p.addUpdateListener(an -> { pulse = (float) an.getAnimatedValue(); invalidate(); });
+                p.start();
+            }
+
+            public void setState(State state) {
+                if (state == State.THINKING) {
+                    ringPaint.setColor(Color.parseColor("#FFD600"));
+                } else if (state == State.SPEAKING) {
+                    ringPaint.setColor(Color.parseColor("#E040FB"));
+                } else if (state == State.ERROR) {
+                    ringPaint.setColor(Color.parseColor("#FF1744"));
+                } else {
+                    ringPaint.setColor(Color.parseColor("#00F0FF"));
+                }
+                invalidate();
+            }
+
+            @Override
+            protected void onDraw(Canvas canvas) {
+                super.onDraw(canvas);
+                float cx = getWidth() / 2f, cy = getHeight() / 2f;
+                float r = Math.min(cx, cy) * 0.8f;
+                if (r <= 0) return;
+                arcBounds.set(cx - r, cy - r, cx + r, cy + r);
+                canvas.drawCircle(cx, cy, r * 0.95f, ringPaint);
+                canvas.save();
+                canvas.rotate(rotationAngle, cx, cy);
+                canvas.drawCircle(cx, cy, r * 0.75f, dashedPaint);
+                canvas.drawArc(arcBounds, 0, 90, false, arcPaint);
+                canvas.drawArc(arcBounds, 180, 70, false, arcPaint);
+                canvas.restore();
+                canvas.drawCircle(cx, cy, 14f * pulse, ringPaint);
+            }
+        }
+        EOF
+
+        # 7. MainActivity Layout
+        cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="#080B10"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="TUSU AI // v1.0.1"
+                    android:textColor="#00F0FF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+                <Button
+                    android:id="@+id/btnSettings"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="SETTINGS"
+                    android:textSize="11sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#151F33" />
+            </LinearLayout>
+
+            <com.akthecoder.tusuai.view.JarvisCoreView
+                android:id="@+id/jarvisCore"
+                android:layout_width="140dp"
+                android:layout_height="140dp"
+                android:layout_gravity="center"
+                android:layout_marginVertical="12dp" />
+
+            <TextView
+                android:id="@+id/tvStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="ONLINE"
+                android:textColor="#00E676"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="4dp"
+                android:background="#151F33" />
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginVertical="12dp">
+                <TextView
+                    android:id="@+id/tvChatLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#F1F5F9"
+                    android:textSize="14sp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="TUSU: Systems online. Ask me anything in English or বাংলা!\n" />
+            </ScrollView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnMic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="MIC"
+                    android:backgroundTint="#0072FF" />
+                <EditText
+                    android:id="@+id/etInput"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="6dp"
+                    android:background="#151F33"
+                    android:hint="Type prompt..."
+                    android:textColor="#F1F5F9"
+                    android:textColorHint="#94A3B8"
+                    android:paddingHorizontal="10dp" />
+                <Button
+                    android:id="@+id/btnSend"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="SEND"
+                    android:backgroundTint="#00F0FF"
+                    android:textColor="#080B10" />
+            </LinearLayout>
+        </LinearLayout>
+        EOF
+
+        # 8. Settings Layout
+        cat << 'EOF' > app/src/main/res/layout/activity_settings.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="#080B10"
+            android:padding="20dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SETTINGS &amp; API CONFIG"
+                android:textColor="#00F0FF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <EditText
+                android:id="@+id/etApiKey"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="16dp"
+                android:background="#151F33"
+                android:padding="10dp"
+                android:hint="Paste Gemini API Key"
+                android:textColor="#F1F5F9"
+                android:textColorHint="#94A3B8" />
+            <Button
+                android:id="@+id/btnSave"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="12dp"
+                android:text="SAVE CONFIGURATION"
+                android:backgroundTint="#0072FF" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="32dp"
+                android:text="TUSU AI v1.0.1\nCreated by AK THE CODER\nTested for Samsung Galaxy A06"
+                android:textColor="#94A3B8" />
+        </LinearLayout>
+        EOF
+
+        # 9. Java Logic - SettingsActivity.java
+        cat << 'EOF' > app/src/main/java/com/akthecoder/tusuai/SettingsActivity.java
+        package com.akthecoder.tusuai;
+        import android.content.SharedPreferences;
+        import android.os.Bundle;
+        import android.widget.Button;
+        import android.widget.EditText;
+        import android.widget.Toast;
+        import androidx.appcompat.app.AppCompatActivity;
+
+        public class SettingsActivity extends AppCompatActivity {
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+                setContentView(R.layout.activity_settings);
+                EditText et = findViewById(R.id.etApiKey);
+                SharedPreferences p = getSharedPreferences("tusu_prefs", MODE_PRIVATE);
+                et.setText(p.getString("gemini_key", ""));
+                findViewById(R.id.btnSave).setOnClickListener(v -> {
+                    p.edit().putString("gemini_key", et.getText().toString().trim()).apply();
+                    Toast.makeText(this, "API Key Saved Successfully!", Toast.LENGTH_SHORT).show();
+                    finish();
+                });
+            }
+        }
+        EOF
+
+        # 10. Java Logic - MainActivity.java
+        cat << 'EOF' > app/src/main/java/com/akthecoder/tusuai/MainActivity.java
+        package com.akthecoder.tusuai;
+
+        import android.Manifest;
+        import android.content.Intent;
+        import android.content.SharedPreferences;
+        import android.content.pm.PackageManager;
+        import android.graphics.Color;
+        import android.hardware.camera2.CameraManager;
+        import android.os.Bundle;
+        import android.speech.RecognitionListener;
+        import android.speech.RecognizerIntent;
+        import android.speech.SpeechRecognizer;
+        import android.speech.tts.TextToSpeech;
+        import android.widget.*;
+        import androidx.appcompat.app.AppCompatActivity;
+        import androidx.core.app.ActivityCompat;
+        import androidx.core.content.ContextCompat;
+        import com.akthecoder.tusuai.view.JarvisCoreView;
+        import okhttp3.*;
+        import org.json.JSONArray;
+        import org.json.JSONObject;
+        import java.io.IOException;
+        import java.util.ArrayList;
+        import java.util.Locale;
+
+        public class MainActivity extends AppCompatActivity {
+            private JarvisCoreView core;
+            private TextView tvStatus, tvChatLog;
+            private EditText etInput;
+            private TextToSpeech tts;
+            private SpeechRecognizer recognizer;
+            private OkHttpClient http = new OkHttpClient();
+
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+                setContentView(R.layout.activity_main);
+
+                core = findViewById(R.id.jarvisCore);
+                tvStatus = findViewById(R.id.tvStatus);
+                tvChatLog = findViewById(R.id.tvChatLog);
+                etInput = findViewById(R.id.etInput);
+
+                tts = new TextToSpeech(this, s -> {
+                    if (s == TextToSpeech.SUCCESS) tts.setLanguage(Locale.US);
+                });
+
+                findViewById(R.id.btnSend).setOnClickListener(v -> {
+                    String q = etInput.getText().toString().trim();
+                    if (!q.isEmpty()) { processUserQuery(q); etInput.setText(""); }
+                });
+
+                findViewById(R.id.btnMic).setOnClickListener(v -> {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, 101);
+                    } else {
+                        listenVoice();
+                    }
+                });
+
+                findViewById(R.id.btnSettings).setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
+            }
+
+            private void processUserQuery(String query) {
+                tvChatLog.append("\nYou: " + query);
+                String l = query.toLowerCase();
+
+                if (l.contains("flashlight on") || l.contains("টর্চ জ্বালাও")) {
+                    toggleFlash(true);
+                    respond("Flashlight activated, sir.");
+                    return;
+                } else if (l.contains("flashlight off") || l.contains("টর্চ বন্ধ করো")) {
+                    toggleFlash(false);
+                    respond("Flashlight deactivated.");
+                    return;
+                }
+
+                core.setState(JarvisCoreView.State.THINKING);
+                tvStatus.setText("THINKING");
+                tvStatus.setTextColor(Color.parseColor("#FFD600"));
+
+                SharedPreferences p = getSharedPreferences("tusu_prefs", MODE_PRIVATE);
+                String key = p.getString("gemini_key", "");
+
+                if (key.isEmpty()) {
+                    respond("Please configure your Gemini API Key in Settings.");
+                    return;
+                }
+
+                try {
+                    String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + key;
+                    JSONObject sys = new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", 
+                        "You are TUSU, personal AI assistant created by AK THE CODER inspired by JARVIS. Speak English when user speaks English, and natural Bengali (বাংলা) when user speaks Bengali/Banglish.")));
+                    JSONObject usr = new JSONObject().put("role", "user").put("parts", new JSONArray().put(new JSONObject().put("text", query)));
+                    JSONObject root = new JSONObject().put("system_instruction", sys).put("contents", new JSONArray().put(usr));
+
+                    http.newCall(new Request.Builder().url(url).post(RequestBody.create(root.toString(), MediaType.get("application/json"))).build())
+                        .enqueue(new Callback() {
+                            @Override public void onFailure(Call c, IOException e) {
+                                runOnUiThread(() -> respond("Network error: " + e.getMessage()));
+                            }
+                            @Override public void onResponse(Call c, Response r) throws IOException {
+                                String body = r.body() != null ? r.body().string() : "";
+                                try {
+                                    String reply = new JSONObject(body).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text");
+                                    runOnUiThread(() -> respond(reply.trim()));
+                                } catch (Exception ex) {
+                                    runOnUiThread(() -> respond("Gemini error: " + body));
+                                }
+                            }
+                        });
+                } catch (Exception e) { respond("Error: " + e.getMessage()); }
+            }
+
+            private void respond(String text) {
+                tvStatus.setText("ONLINE");
+                tvStatus.setTextColor(Color.parseColor("#00E676"));
+                core.setState(JarvisCoreView.State.ONLINE);
+                tvChatLog.append("\nTUSU: " + text + "\n");
+                boolean bn = false;
+                for (char c : text.toCharArray()) if (Character.UnicodeBlock.of(c).equals(Character.UnicodeBlock.BENGALI)) { bn = true; break; }
+                if (bn) tts.setLanguage(new Locale("bn", "BD")); else tts.setLanguage(Locale.US);
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ID");
+            }
+
+            private void listenVoice() {
+                recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                recognizer.setRecognitionListener(new RecognitionListener() {
+                    @Override public void onReadyForSpeech(Bundle b) {
+                        tvStatus.setText("LISTENING");
+                        tvStatus.setTextColor(Color.parseColor("#00F0FF"));
+                        core.setState(JarvisCoreView.State.LISTENING);
+                    }
+                    @Override public void onResults(Bundle b) {
+                        ArrayList<String> m = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                        if (m != null && !m.isEmpty()) processUserQuery(m.get(0));
+                    }
+                    @Override public void onError(int e) { tvStatus.setText("ONLINE"); core.setState(JarvisCoreView.State.ONLINE); }
+                    @Override public void onBeginningOfSpeech() {}
+                    @Override public void onRmsChanged(float v) {}
+                    @Override public void onBufferReceived(byte[] b) {}
+                    @Override public void onEndOfSpeech() {}
+                    @Override public void onPartialResults(Bundle b) {}
+                    @Override public void onEvent(int t, Bundle b) {}
+                });
+                recognizer.startListening(i);
+            }
+
+            private void toggleFlash(boolean enable) {
+                try {
+                    CameraManager cm = (CameraManager) getSystemService(CAMERA_SERVICE);
+                    cm.setTorchMode(cm.getCameraIdList()[0], enable);
+                } catch (Exception ignored) {}
+            }
+        }
+        EOF
+
+    - name: Compile TUSU AI APK
+      run: gradle assembleDebug --stacktrace
+
+    - name: Rename APK Output
+      run: cp app/build/outputs/apk/debug/app-debug.apk TUSU-AI-1.0.1-debug.apk
+
+    - name: Upload APK as Downloadable Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: TUSU-AI-1.0.1-debug-apk
+        path: TUSU-AI-1.0.1-debug.apk
+        retention-days: 14
